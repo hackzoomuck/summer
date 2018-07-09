@@ -4,13 +4,19 @@
 #include <opencv/cv.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#define THRESHOLD 100
+#define BRIGHT 0.7
+#define DARK 0.2
+
 
 using namespace cv;
 using namespace std;
 
 
 Mat src; Mat src_gray;
-int thresh = 40;
+int thresh = 150;
 int max_thresh = 255;
 RNG rng(12345);
 int ans;
@@ -45,13 +51,13 @@ void thresh_callback(int, void*)
 
 	/// Draw contours
 	Mat drawing = Mat::zeros(canny_output.size(), CV_8UC3);
-	for (int i = 0; i< contours.size(); i++)
+	for (int i = 0; i < contours.size(); i++)
 	{
 		Scalar color = Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255));
 		drawContours(drawing, contours, i, color, 2, 8, hierarchy, 0, Point());
 		cout << "# of contour points: " << contours[i].size() << std::endl;
 
-		for (unsigned int j = 0; j<contours[i].size(); j++)
+		for (unsigned int j = 0; j < contours[i].size(); j++)
 		{
 			ans += contourArea(contours[i]);
 			//cout << "Point(x,y)=" << contours[i][j] << std::endl;
@@ -119,7 +125,7 @@ public:
 		// nbins의 90%를 최대점으로 설정
 
 
-		for (int h = 0; h<histSize[0]; h++) { // 각 빈도에 대한 수직선을 그리기 
+		for (int h = 0; h < histSize[0]; h++) { // 각 빈도에 대한 수직선을 그리기 
 			float binVal = hist.at<float>(h);
 			int intensity = static_cast<int>(binVal*hpt / maxVal);
 			cv::line(histImg, cv::Point(h, histSize[0]), cv::Point(h, histSize[0] - intensity), cv::Scalar::all(0));
@@ -132,12 +138,11 @@ public:
 int main(int argc, char** argv)
 {
 	Mat inputImg, resultImg;
-	Mat hlsImg;
-	Mat skinImg;
+	Mat hlsImg, rgbImg;
+	Mat skinImg, veinImg;
 	Mat img_gray;
 
 	inputImg = imread("city.jpg");
-
 	CV_Assert(inputImg.depth() == CV_8U);
 	resultImg.create(inputImg.size(), inputImg.type());
 
@@ -201,14 +206,76 @@ int main(int argc, char** argv)
 	imshow("Original", inputImg);
 	imshow("SkinDetected", skinImg);
 
+	// Read source image in grayscale mode
+	Mat img = skinImg;
+
+	// Apply ??? algorithm from https://stackoverflow.com/a/14874992/2501769
+	Mat enhanced, float_gray, blur, num, den;
+	img.convertTo(float_gray, CV_32F, 1.0 / 255.0);
+	cv::GaussianBlur(float_gray, blur, Size(0, 0), 10);
+	num = float_gray - blur;
+	cv::GaussianBlur(num.mul(num), blur, Size(0, 0), 20);
+	cv::pow(blur, 0.5, den);
+	enhanced = num / den;
+	cv::normalize(enhanced, enhanced, 0.0, 255.0, NORM_MINMAX, -1);
+	enhanced.convertTo(enhanced, CV_8UC1);
+
+	// Low-pass filter
+	Mat gaussian;
+	cv::GaussianBlur(enhanced, gaussian, Size(0, 0), 3);
+
+	// High-pass filter on computed low-pass image
+	Mat laplace;
+	Laplacian(gaussian, laplace, CV_32F, 19);
+	double lapmin, lapmax;
+	minMaxLoc(laplace, &lapmin, &lapmax);
+	double scale = 127 / max(-lapmin, lapmax);
+	laplace.convertTo(laplace, CV_8U, scale, 128);
+
+	// Thresholding using empirical value of 150 to create a vein mask
+	Mat mask;
+	cv::threshold(laplace, mask, THRESHOLD, 255, CV_THRESH_BINARY);
+
+	// Clean-up the mask using open morphological operation
+	morphologyEx(mask, mask, cv::MORPH_OPEN,
+		getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(5, 5)));
+
+	// Connect the neighboring areas using close morphological operation
+	Mat connected;
+	morphologyEx(mask, mask, cv::MORPH_CLOSE,
+		getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(11, 11)));
+
+	// Blurry the mask for a smoother enhancement
+	cv::GaussianBlur(mask, mask, Size(15, 15), 0);
+
+	// Blurry a little bit the image as well to remove noise
+	cv::GaussianBlur(enhanced, enhanced, Size(3, 3), 0);
+
+	// The mask is used to amplify the veins
+	Mat result(enhanced);
+	ushort new_pixel;
+	double coeff;
+	for (int i = 0; i<mask.rows; i++) {
+		for (int j = 0; j<mask.cols; j++) {
+			coeff = (1.0 - (mask.at<uchar>(i, j) / 255.0))*BRIGHT + (1 - DARK);
+			new_pixel = coeff * enhanced.at<uchar>(i, j);
+			result.at<uchar>(i, j) = (new_pixel>255) ? 255 : new_pixel;
+		}
+	}
+
+	// Show results
+	imshow("frame", img);
+	waitKey();
+	imshow("frame", result);
+	waitKey();
 
 	/// Convert image to gray and blur it
 	cvtColor(src, src_gray, CV_BGR2GRAY);
-	blur(src_gray, src_gray, Size(3, 3));
+	//blur(src_gray, src_gray, Size(3, 3));
 
 	/// Create Window
 
-	src = skinImg;
+	src = img;
 	const char* source_window = "Source";
 	namedWindow(source_window, CV_WINDOW_AUTOSIZE);
 	imshow(source_window, src);
@@ -229,10 +296,10 @@ int main(int argc, char** argv)
 
 	findContours(thr, contours, hierarchy, CV_RETR_CCOMP, CV_CHAIN_APPROX_SIMPLE); // Find the contours in the image
 
-	for (int i = 0; i< contours.size(); i++) // iterate through each contour. 
+	for (int i = 0; i < contours.size(); i++) // iterate through each contour. 
 	{
 		double a = contourArea(contours[i], false);  //  Find the area of contour
-		if (a>largest_area) {
+		if (a > largest_area) {
 			largest_area = a;
 			largest_contour_index = i;                //Store the index of largest contour
 													  //bounding_rect = boundingRect(contours[i]); // Find the bounding rectangle for biggest contour
@@ -247,14 +314,14 @@ int main(int argc, char** argv)
 	imshow("largest Contour", dst);
 
 	//히스토그램
-	if (!src.data)
+	if (!skinImg.data)
 		return 0;
 
 	cv::namedWindow("Image");
-	cv::imshow("Image", src);
+	cv::imshow("Image", skinImg);
 
 	Histogram1D h; // 히스토그램 객체
-	cv::MatND histo = h.getHistogram(src); // 히스토그램 계산
+	cv::MatND histo = h.getHistogram(skinImg); // 히스토그램 계산
 
 	int sum = 0;
 	for (int i = 0; i < 256; i++) { // 각 빈도 조회
@@ -262,7 +329,7 @@ int main(int argc, char** argv)
 		sum += histo.at<float>(i);
 	}
 
-	cout << sum - histo.at<float>(0) << endl;
+	cout << "전체 다리: "<< sum - histo.at<float>(0) << endl;
 
 	cv::namedWindow("Histogram");
 	cv::imshow("Histogram", h.getHistogramImage(src));
@@ -288,11 +355,58 @@ int main(int argc, char** argv)
 
 
 	//윈도우에 출력  
-	imshow("original image", src);
+	imshow("original image", skinImg);
 	imshow("gray image", img_gray);
 
 	//윈도우에 콜백함수를 등록
 	setMouseCallback("gray image", CallBackFunc, NULL);
+
+	// read a pixel from image directly // pixel을주어지면 그 pixel의 색 검출
+	/*int nBlue, nGreen, nRed;
+	nBlue = 0; nGreen = 0; nRed = 0;
+
+	nBlue = inputImg.at<cv::Vec3b>(167, 342)[0];
+	nGreen = inputImg.at<cv::Vec3b>(167, 342)[1];
+	nRed = inputImg.at<cv::Vec3b>(167, 342)[2];
+
+	cout << "Red : " << nRed << " , Green : " << nGreen << " , Blue : " << nBlue << endl;
+
+	veinImg = skinImg.clone();
+
+	cvtColor(veinImg, rgbImg, CV_BGR2HLS);
+	vector<Mat> rgb_images(3);
+	split(rgbImg, rgb_images);
+
+	for (int row = 0; row < rgbImg.rows; row++)
+	{
+		for (int col = 0; col < rgbImg.cols; col++)
+		{
+			uchar b = rgbImg.at<Vec3b>(row, col)[0];
+			uchar g = rgbImg.at<Vec3b>(row, col)[1];
+			uchar r = rgbImg.at<Vec3b>(row, col)[2];
+
+			bool vein_pixel = (r <= 50) && (g < 30) && (b < 110);
+
+			if (vein_pixel == false)
+			{
+				veinImg.at<Vec3b>(row, col)[0] = 0;
+				veinImg.at<Vec3b>(row, col)[1] = 0;
+				veinImg.at<Vec3b>(row, col)[2] = 0;
+			}
+		}
+	}
+
+	namedWindow("Original", CV_WINDOW_AUTOSIZE);
+	namedWindow("VeinDetected", CV_WINDOW_AUTOSIZE);
+
+
+	moveWindow("Original", 100, 100);
+	moveWindow("VeinDetected", 120, 120);
+
+
+	imshow("Original", src);
+	imshow("VeinDetected", veinImg);*/
+
 
 	waitKey(0);
 	return 0;
