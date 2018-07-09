@@ -10,9 +10,10 @@ using namespace std;
 
 
 Mat src; Mat src_gray;
-int thresh = 50;
+int thresh = 40;
 int max_thresh = 255;
 RNG rng(12345);
+int ans;
 
 void thresh_callback(int, void*)
 {
@@ -20,9 +21,26 @@ void thresh_callback(int, void*)
 	vector<vector<Point> > contours;
 	vector<Vec4i> hierarchy;
 
-	/// Detect edges using canny
+	int kernel_size = 3;
+	int scale = 1;
+	int delta = 0;
+	int ddepth = CV_16S;
+	const char* src_name = "Source";
+	const char* canny_name = "Canny";
+
 	Canny(src_gray, canny_output, thresh, thresh * 2, 3);
-	/// Find contours
+
+	namedWindow(src_name, WINDOW_AUTOSIZE);
+	namedWindow(canny_name, WINDOW_AUTOSIZE);
+
+	//This is for source image.
+	imshow(src_name, src);
+
+	Mat canny_dst;
+	//This is for canny edge detection.
+	Canny(src_gray, canny_dst, 50, 200, 3, false);
+	imshow(canny_name, canny_dst);
+
 	findContours(canny_output, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
 
 	/// Draw contours
@@ -31,11 +49,25 @@ void thresh_callback(int, void*)
 	{
 		Scalar color = Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255));
 		drawContours(drawing, contours, i, color, 2, 8, hierarchy, 0, Point());
-	}
+		cout << "# of contour points: " << contours[i].size() << std::endl;
 
-	/// Show in a window
-	namedWindow("Contours", CV_WINDOW_AUTOSIZE);
-	imshow("Contours", drawing);
+		for (unsigned int j = 0; j<contours[i].size(); j++)
+		{
+			ans += contourArea(contours[i]);
+			//cout << "Point(x,y)=" << contours[i][j] << std::endl;
+		}
+
+		cout << " Area: " << i << " " << contourArea(contours[i]) << "\n\n";
+	}
+	cout << "part of Area: " << ans << "\n\n";
+}
+
+void CallBackFunc(int event, int x, int y, int flags, void* userdata)
+{
+	if (event == EVENT_LBUTTONDOWN)
+	{
+		cout << "왼쪽 마우스 버튼 클릭.. 좌표 = (" << x << ", " << y << ")" << endl;
+	}
 }
 
 class Histogram1D {
@@ -102,6 +134,7 @@ int main(int argc, char** argv)
 	Mat inputImg, resultImg;
 	Mat hlsImg;
 	Mat skinImg;
+	Mat img_gray;
 
 	inputImg = imread("city.jpg");
 
@@ -133,7 +166,7 @@ int main(int argc, char** argv)
 	//resize(inputImg, inputImg, Size(), 0.4, 0.4, CV_INTER_AREA);
 	skinImg = src.clone();
 
-	cvtColor(inputImg, hlsImg, CV_BGR2HLS);
+	cvtColor(skinImg, hlsImg, CV_BGR2HLS);
 	vector<Mat> hls_images(3);
 	split(hlsImg, hls_images);
 
@@ -168,7 +201,7 @@ int main(int argc, char** argv)
 	imshow("Original", inputImg);
 	imshow("SkinDetected", skinImg);
 
-	
+
 	/// Convert image to gray and blur it
 	cvtColor(src, src_gray, CV_BGR2GRAY);
 	blur(src_gray, src_gray, Size(3, 3));
@@ -192,7 +225,6 @@ int main(int argc, char** argv)
 	threshold(thr, thr, 25, 255, THRESH_BINARY); //Threshold the gray
 
 	vector<vector<Point>> contours; // Vector for storing contour
-	vector<vector<Point>> largest;
 	vector<Vec4i> hierarchy;
 
 	findContours(thr, contours, hierarchy, CV_RETR_CCOMP, CV_CHAIN_APPROX_SIMPLE); // Find the contours in the image
@@ -203,16 +235,15 @@ int main(int argc, char** argv)
 		if (a>largest_area) {
 			largest_area = a;
 			largest_contour_index = i;                //Store the index of largest contour
-			largest.push_back(contours[i]);
-			//bounding_rect = boundingRect(contours[i]); // Find the bounding rectangle for biggest contour
+													  //bounding_rect = boundingRect(contours[i]); // Find the bounding rectangle for biggest contour
 		}
 
 	}
 
 	Scalar color(255, 255, 255);
 	drawContours(dst, contours, largest_contour_index, color, CV_FILLED, 8, hierarchy); // Draw the largest contour using previously stored index.
-	//rectangle(src, bounding_rect, Scalar(0, 255, 0), 1, 8, 0);
-	//imshow("src", src);
+																						//rectangle(src, bounding_rect, Scalar(0, 255, 0), 1, 8, 0);
+																						//imshow("src", src);
 	imshow("largest Contour", dst);
 
 	//히스토그램
@@ -227,11 +258,11 @@ int main(int argc, char** argv)
 
 	int sum = 0;
 	for (int i = 0; i < 256; i++) { // 각 빈도 조회
-		std::cout << "Value " << i << " = " << histo.at<float>(i) << std::endl;
+									//   std::cout << "Value " << i << " = " << histo.at<float>(i) << std::endl;
 		sum += histo.at<float>(i);
 	}
 
-	cout << sum-histo.at<float>(0) << endl;
+	cout << sum - histo.at<float>(0) << endl;
 
 	cv::namedWindow("Histogram");
 	cv::imshow("Histogram", h.getHistogramImage(src));
@@ -248,6 +279,20 @@ int main(int argc, char** argv)
 	cv::namedWindow("Binary Image"); // 경계화된 영상 띄워 보기
 	cv::imshow("Binary Image", thresholded); // 배경과 전경이 분할됨
 
+											 // 그레이스케일 이미지로 변환
+	cvtColor(src, img_gray, COLOR_BGR2GRAY);
+
+	//윈도우 생성  
+	namedWindow("original image", WINDOW_AUTOSIZE);
+	namedWindow("gray image", WINDOW_AUTOSIZE);
+
+
+	//윈도우에 출력  
+	imshow("original image", src);
+	imshow("gray image", img_gray);
+
+	//윈도우에 콜백함수를 등록
+	setMouseCallback("gray image", CallBackFunc, NULL);
 
 	waitKey(0);
 	return 0;
