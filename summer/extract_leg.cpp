@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <math.h>
 #define THRESHOLD 100
 #define BRIGHT 0.7
 #define DARK 0.2
@@ -14,9 +15,12 @@
 using namespace cv;
 using namespace std;
 
+Mat canny_dst;
+Mat area1, area2;
 
+int check;
 Mat src; Mat src_gray;
-int thresh = 150;
+int thresh = 90;//170
 int max_thresh = 255;
 RNG rng(12345);
 int ans;
@@ -33,29 +37,32 @@ void thresh_callback(int, void*)
 	int ddepth = CV_16S;
 	const char* src_name = "Source";
 	const char* canny_name = "Canny";
+	const char* canny_name2 = "Canny2";
+
 
 	Canny(src_gray, canny_output, thresh, thresh * 2, 3);
 
-	namedWindow(src_name, WINDOW_AUTOSIZE);
-	namedWindow(canny_name, WINDOW_AUTOSIZE);
-
-	//This is for source image.
-	imshow(src_name, src);
-
-	Mat canny_dst;
-	//This is for canny edge detection.
 	Canny(src_gray, canny_dst, 50, 200, 3, false);
+
+	/// Find contours 
+	findContours(canny_output, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
+
+	/*canny_dst = canny_dst.clone();
+
+	if (check == 1)
 	imshow(canny_name, canny_dst);
+	else
+	imshow(canny_name2, canny_dst);
+	*/
 
-	findContours(canny_output, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
-
-	/// Draw contours
+	/// Draw contours 
 	Mat drawing = Mat::zeros(canny_output.size(), CV_8UC3);
+
 	for (int i = 0; i < contours.size(); i++)
 	{
-		Scalar color = Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255));
-		drawContours(drawing, contours, i, color, 2, 8, hierarchy, 0, Point());
-		cout << "# of contour points: " << contours[i].size() << std::endl;
+		Scalar color = Scalar(255, 255, 255);
+		drawContours(drawing, contours, i, color, 2, 8, hierarchy, 0, Point2i());
+		//   cout << "# of contour points: " << contours[i].size() << std::endl;
 
 		for (unsigned int j = 0; j < contours[i].size(); j++)
 		{
@@ -63,10 +70,33 @@ void thresh_callback(int, void*)
 			//cout << "Point(x,y)=" << contours[i][j] << std::endl;
 		}
 
-		cout << " Area: " << i << " " << contourArea(contours[i]) << "\n\n";
+		//cout << " Area: " << i << " " << contourArea(contours[i]) << "\n\n";
 	}
-	cout << "part of Area: " << ans << "\n\n";
+
+
+	/// Show in a window 
+
+	namedWindow("Contours", CV_WINDOW_AUTOSIZE);
+	imshow("Contours", drawing);
+
+	//   findContours(canny_output, canny_dst, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
+
+	canny_dst = drawing.clone();
+
+	if (check == 1) {
+		imshow(canny_name, canny_dst);
+		area1 = canny_dst;
+	}
+	else{
+		imshow(canny_name2, canny_dst);
+		area2 = canny_dst;
+	}
+
+	check++;
 }
+
+
+
 
 void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 {
@@ -137,11 +167,12 @@ public:
 
 int main(int argc, char** argv)
 {
+	check = 1;
+
 	Mat inputImg, resultImg;
 	Mat hlsImg, rgbImg;
 	Mat skinImg, veinImg;
 	Mat img_gray;
-
 	inputImg = imread("city.jpg");
 	CV_Assert(inputImg.depth() == CV_8U);
 	resultImg.create(inputImg.size(), inputImg.type());
@@ -164,6 +195,7 @@ int main(int argc, char** argv)
 	resultImg.row(resultImg.rows - 1).setTo(Scalar(0));
 	resultImg.col(0).setTo(Scalar(0));
 	resultImg.col(resultImg.cols - 1).setTo(Scalar(0));
+
 
 	/// Load source image and convert it to gray
 	src = resultImg;
@@ -263,25 +295,59 @@ int main(int argc, char** argv)
 		}
 	}
 
+
 	// Show results
 	imshow("frame", img);
-	waitKey();
 	imshow("frame", result);
 	waitKey();
 
-	/// Convert image to gray and blur it
-	cvtColor(src, src_gray, CV_BGR2GRAY);
-	//blur(src_gray, src_gray, Size(3, 3));
 
-	/// Create Window
 
-	src = img;
-	const char* source_window = "Source";
-	namedWindow(source_window, CV_WINDOW_AUTOSIZE);
-	imshow(source_window, src);
+	src_gray = img;
 
 	createTrackbar(" Canny thresh:", "Source", &thresh, max_thresh, thresh_callback);
 	thresh_callback(0, 0);
+
+
+
+
+	cv::Mat mask2 = src_gray.clone();
+
+	cv::dilate(mask2, mask2, cv::Mat());
+	cv::dilate(mask2, mask2, cv::Mat());
+	cv::erode(mask2, mask2, cv::Mat());
+	cv::erode(mask2, mask2, cv::Mat());
+
+	cv::erode(mask2, mask2, cv::Mat());
+	cv::erode(mask2, mask2, cv::Mat());
+	cv::dilate(mask2, mask2, cv::Mat());
+	cv::dilate(mask2, mask2, cv::Mat());
+
+	cv::Mat median;
+	cv::medianBlur(img, median, 7);
+
+	cv::Mat resizedIn;
+	cv::Mat resizedMask;
+	cv::Mat resizedMedian;
+	cv::resize(mask2, resizedMask, cv::Size(), 1, 1);
+	cv::resize(median, resizedMedian, cv::Size(), 1, 1);
+	cv::resize(img, resizedIn, cv::Size(), 1, 1);
+
+	cv::imshow("input", resizedIn);
+	cv::imshow("mask", resizedMask);
+	cv::imshow("median", resizedMedian);
+
+	cv::waitKey(0);
+
+
+
+	src_gray = median;
+
+	createTrackbar(" Canny thresh:", "Source", &thresh, max_thresh, thresh_callback);
+	thresh_callback(0, 0);
+
+
+
 	int largest_area = 0;
 	int largest_contour_index = 0;
 	Rect bounding_rect;
@@ -298,6 +364,16 @@ int main(int argc, char** argv)
 
 	for (int i = 0; i < contours.size(); i++) // iterate through each contour. 
 	{
+
+		//if (contours[i].size() < 10000 && contours[i].size() > 0)
+		//{
+		//   double size = cv::contourArea(contours[i]);
+		//   if (size>largest_area)
+		//   {
+		//      largest_area = size;
+		//      largest_contour_index = i; 
+		//   }
+		//}
 		double a = contourArea(contours[i], false);  //  Find the area of contour
 		if (a > largest_area) {
 			largest_area = a;
@@ -311,28 +387,58 @@ int main(int argc, char** argv)
 	drawContours(dst, contours, largest_contour_index, color, CV_FILLED, 8, hierarchy); // Draw the largest contour using previously stored index.
 																						//rectangle(src, bounding_rect, Scalar(0, 255, 0), 1, 8, 0);
 																						//imshow("src", src);
-	imshow("largest Contour", dst);
+																						//   imshow("largest Contour", dst);
 
-	//히스토그램
+																						//히스토그램
 	if (!skinImg.data)
 		return 0;
 
-	cv::namedWindow("Image");
-	cv::imshow("Image", skinImg);
+	//   cv::namedWindow("Image");
+	//   cv::imshow("Image", skinImg);
 
 	Histogram1D h; // 히스토그램 객체
-	cv::MatND histo = h.getHistogram(skinImg); // 히스토그램 계산
+	cv::MatND histo = h.getHistogram(median); // 히스토그램 계산
 
-	int sum = 0;
+	float sum = 0;
 	for (int i = 0; i < 256; i++) { // 각 빈도 조회
 									//   std::cout << "Value " << i << " = " << histo.at<float>(i) << std::endl;
 		sum += histo.at<float>(i);
+		//cout << i << " is " << histo.at<float>(i)<<endl;
 	}
+	sum -= histo.at<float>(0);
+	cout << "전체 다리: " << sum<< endl;
 
-	cout << "전체 다리: "<< sum - histo.at<float>(0) << endl;
+	Histogram1D h1; // 히스토그램 객체
+	cv::MatND histo1 = h1.getHistogram(area1); // 히스토그램 계산
 
-	cv::namedWindow("Histogram");
-	cv::imshow("Histogram", h.getHistogramImage(src));
+	float sum1=0;
+	for (int i = 0; i < 256; i++) { // 각 빈도 조회
+									//   std::cout << "Value " << i << " = " << histo.at<float>(i) << std::endl;
+		sum1 += histo1.at<float>(i);
+		//cout << i << " is " << histo1.at<float>(i)<<endl;
+	}
+//	sum1 -= histo1.at<float>(0);
+	Histogram1D h2; // 히스토그램 객체
+	cv::MatND histo2 = h2.getHistogram(area2); // 히스토그램 계산
+
+	float sum2=0;
+	for (int i = 0; i < 256; i++) { // 각 빈도 조회
+									//   std::cout << "Value " << i << " = " << histo.at<float>(i) << std::endl;
+		sum2 += histo2.at<float>(i);
+
+		//cout << i << " is " << histo1.at<float>(i) << endl;
+	}
+//	sum2 -= histo2.at<float>(0);
+
+	//cout << "다리영역 sum1 << "  " << sum2<<endl;
+	float sum3 = sum2 - sum1;
+	cout << "하지정맥 영역: " <<sum3<<endl;
+	cout << "하지정맥이 차지하는 퍼센트" << ( sum3 / sum )* 100 << endl;
+
+
+
+	//   cv::namedWindow("Histogram");
+	//   cv::imshow("Histogram", h.getHistogramImage(src));
 	// 히스토그램을 영상으로 띄우기
 	// 가운데를 중심으로 왼쪽이 검정색, 오른쪽이 흰색값
 	// 가운데 봉우리 부분은 중간 명암도 값
@@ -340,72 +446,27 @@ int main(int argc, char** argv)
 
 	// 영상을 두 그룹으로 나누는 부분을 경계값으로 처리해 확인
 	cv::Mat thresholded; // 경계값으로 이진 영상 생성
-	cv::threshold(src, thresholded, 60, 255, cv::THRESH_BINARY);
+	cv::threshold(src, thresholded, 200, 255, cv::THRESH_BINARY);
 	// 영상을 경계화 하기 위해 히스토그램의 
 	// 높은 봉우리(명암값 60) 방향으로 증가하기 직전인 최소값으로 정함.
-	cv::namedWindow("Binary Image"); // 경계화된 영상 띄워 보기
-	cv::imshow("Binary Image", thresholded); // 배경과 전경이 분할됨
 
-											 // 그레이스케일 이미지로 변환
+	//   cv::namedWindow("Binary Image"); // 경계화된 영상 띄워 보기
+	//   cv::imshow("Binary Image", thresholded); // 배경과 전경이 분할됨
+
+	// 그레이스케일 이미지로 변환
 	cvtColor(src, img_gray, COLOR_BGR2GRAY);
 
 	//윈도우 생성  
-	namedWindow("original image", WINDOW_AUTOSIZE);
-	namedWindow("gray image", WINDOW_AUTOSIZE);
+	//   namedWindow("original image", WINDOW_AUTOSIZE);
+	namedWindow("click image", WINDOW_AUTOSIZE);
 
 
 	//윈도우에 출력  
-	imshow("original image", skinImg);
-	imshow("gray image", img_gray);
+	//   imshow("original image", inputImg);
+	imshow("click image", inputImg);
 
 	//윈도우에 콜백함수를 등록
 	setMouseCallback("gray image", CallBackFunc, NULL);
-
-	// read a pixel from image directly // pixel을주어지면 그 pixel의 색 검출
-	/*int nBlue, nGreen, nRed;
-	nBlue = 0; nGreen = 0; nRed = 0;
-
-	nBlue = inputImg.at<cv::Vec3b>(167, 342)[0];
-	nGreen = inputImg.at<cv::Vec3b>(167, 342)[1];
-	nRed = inputImg.at<cv::Vec3b>(167, 342)[2];
-
-	cout << "Red : " << nRed << " , Green : " << nGreen << " , Blue : " << nBlue << endl;
-
-	veinImg = skinImg.clone();
-
-	cvtColor(veinImg, rgbImg, CV_BGR2HLS);
-	vector<Mat> rgb_images(3);
-	split(rgbImg, rgb_images);
-
-	for (int row = 0; row < rgbImg.rows; row++)
-	{
-		for (int col = 0; col < rgbImg.cols; col++)
-		{
-			uchar b = rgbImg.at<Vec3b>(row, col)[0];
-			uchar g = rgbImg.at<Vec3b>(row, col)[1];
-			uchar r = rgbImg.at<Vec3b>(row, col)[2];
-
-			bool vein_pixel = (r <= 50) && (g < 30) && (b < 110);
-
-			if (vein_pixel == false)
-			{
-				veinImg.at<Vec3b>(row, col)[0] = 0;
-				veinImg.at<Vec3b>(row, col)[1] = 0;
-				veinImg.at<Vec3b>(row, col)[2] = 0;
-			}
-		}
-	}
-
-	namedWindow("Original", CV_WINDOW_AUTOSIZE);
-	namedWindow("VeinDetected", CV_WINDOW_AUTOSIZE);
-
-
-	moveWindow("Original", 100, 100);
-	moveWindow("VeinDetected", 120, 120);
-
-
-	imshow("Original", src);
-	imshow("VeinDetected", veinImg);*/
 
 
 	waitKey(0);
