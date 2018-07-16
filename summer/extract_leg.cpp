@@ -16,15 +16,16 @@ using namespace cv;
 using namespace std;
 
 Mat canny_dst;
+Mat canny_rem;
 Mat area1, area2;
-
-int check;
+int thresh;
+int check, check_back;
 Mat src; Mat src_gray;
-int thresh = 90;//170
 int max_thresh = 255;
 RNG rng(12345);
 int ans;
-
+int entire;
+void test();
 void thresh_callback(int, void*)
 {
 	Mat canny_output;
@@ -40,20 +41,15 @@ void thresh_callback(int, void*)
 	const char* canny_name2 = "Canny2";
 
 
-	Canny(src_gray, canny_output, thresh, thresh * 2, 3);
+	if (!(check_back == 0 || check == 1)) {
+		src_gray = canny_rem;
+	}
 
-	Canny(src_gray, canny_dst, 50, 200, 3, false);
+
+	Canny(src_gray, canny_output, thresh, thresh * 2, 3);
 
 	/// Find contours 
 	findContours(canny_output, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE, Point(0, 0));
-
-	/*canny_dst = canny_dst.clone();
-
-	if (check == 1)
-	imshow(canny_name, canny_dst);
-	else
-	imshow(canny_name2, canny_dst);
-	*/
 
 	/// Draw contours 
 	Mat drawing = Mat::zeros(canny_output.size(), CV_8UC3);
@@ -69,8 +65,6 @@ void thresh_callback(int, void*)
 			ans += contourArea(contours[i]);
 			//cout << "Point(x,y)=" << contours[i][j] << std::endl;
 		}
-
-		//cout << " Area: " << i << " " << contourArea(contours[i]) << "\n\n";
 	}
 
 
@@ -83,28 +77,23 @@ void thresh_callback(int, void*)
 
 	canny_dst = drawing.clone();
 
-	if (check == 1) {
-		imshow(canny_name, canny_dst);
-		area1 = canny_dst;
-	}
-	else{
+	if (check_back == 0 && check != 1) {
 		imshow(canny_name2, canny_dst);
 		area2 = canny_dst;
 	}
+	else if (check == 1) {
+		imshow(canny_name, canny_dst);
+		area1 = canny_dst;
+	}
+	else {
+		imshow(canny_name, canny_dst);
+		area1 = canny_dst;
+	}
+
 
 	check++;
 }
 
-
-
-
-void CallBackFunc(int event, int x, int y, int flags, void* userdata)
-{
-	if (event == EVENT_LBUTTONDOWN)
-	{
-		cout << "왼쪽 마우스 버튼 클릭.. 좌표 = (" << x << ", " << y << ")" << endl;
-	}
-}
 
 class Histogram1D {
 private:
@@ -165,8 +154,58 @@ public:
 	}
 };
 
-int main(int argc, char** argv)
+
+void hst() {
+	Histogram1D h1; // 히스토그램 객체
+	cv::MatND histo1 = h1.getHistogram(area1); // 히스토그램 계산
+
+	float sum1 = 0;
+	for (int i = 0; i < 256; i++) { // 각 빈도 조회
+									//   std::cout << "Value " << i << " = " << histo.at<float>(i) << std::endl;
+		sum1 += histo1.at<float>(i);
+		//cout << i << " is " << histo1.at<float>(i)<<endl;
+	}
+	//   sum1 -= histo1.at<float>(0);
+	Histogram1D h2; // 히스토그램 객체
+	cv::MatND histo2 = h2.getHistogram(area2); // 히스토그램 계산
+
+	float sum2 = 0;
+	for (int i = 0; i < 256; i++) { // 각 빈도 조회
+									//   std::cout << "Value " << i << " = " << histo.at<float>(i) << std::endl;
+		sum2 += histo2.at<float>(i);
+
+		//cout << i << " is " << histo1.at<float>(i) << endl;
+	}
+	//   sum2 -= histo2.at<float>(0);
+
+	//cout << "다리영역 sum1 << "  " << sum2<<endl;
+	float sum3 = sum2 - sum1;
+	cout << "하지정맥 영역: " << sum3 << endl;
+	cout << "하지정맥이 차지하는 퍼센트" << (sum3 / entire) * 100 << endl;
+}
+
+void CallBackFunc(int event, int x, int y, int flags, void* userdata)
 {
+	if (event == EVENT_LBUTTONDOWN) {
+		hst();
+	}
+	if (event == EVENT_RBUTTONDOWN) {
+		cout << "왼쪽 마우스 버튼 클릭.. 좌표 = (" << x << ", " << y << ")" << endl;
+	}
+	if (event == EVENT_MOUSEWHEEL) {
+		if (getMouseWheelDelta(flags)>0)
+			thresh += 5;
+		else
+			thresh -= 5;
+
+		check_back = 1;
+		printf("thresh : %d\n", thresh);
+		test();
+
+	}
+}
+
+void test() {
 	check = 1;
 
 	Mat inputImg, resultImg;
@@ -299,7 +338,7 @@ int main(int argc, char** argv)
 	// Show results
 	imshow("frame", img);
 	imshow("frame", result);
-	waitKey();
+	//   waitKey();
 
 
 
@@ -308,7 +347,7 @@ int main(int argc, char** argv)
 	createTrackbar(" Canny thresh:", "Source", &thresh, max_thresh, thresh_callback);
 	thresh_callback(0, 0);
 
-
+	canny_rem = canny_dst.clone();
 
 
 	cv::Mat mask2 = src_gray.clone();
@@ -337,7 +376,7 @@ int main(int argc, char** argv)
 	cv::imshow("mask", resizedMask);
 	cv::imshow("median", resizedMedian);
 
-	cv::waitKey(0);
+	//   cv::waitKey(0);
 
 
 
@@ -364,16 +403,6 @@ int main(int argc, char** argv)
 
 	for (int i = 0; i < contours.size(); i++) // iterate through each contour. 
 	{
-
-		//if (contours[i].size() < 10000 && contours[i].size() > 0)
-		//{
-		//   double size = cv::contourArea(contours[i]);
-		//   if (size>largest_area)
-		//   {
-		//      largest_area = size;
-		//      largest_contour_index = i; 
-		//   }
-		//}
 		double a = contourArea(contours[i], false);  //  Find the area of contour
 		if (a > largest_area) {
 			largest_area = a;
@@ -383,67 +412,24 @@ int main(int argc, char** argv)
 
 	}
 
-	Scalar color(255, 255, 255);
-	drawContours(dst, contours, largest_contour_index, color, CV_FILLED, 8, hierarchy); // Draw the largest contour using previously stored index.
-																						//rectangle(src, bounding_rect, Scalar(0, 255, 0), 1, 8, 0);
-																						//imshow("src", src);
-																						//   imshow("largest Contour", dst);
+	//   Scalar color(255, 255, 255);
+	//   drawContours(dst, contours, largest_contour_index, color, CV_FILLED, 8, hierarchy); // Draw the largest contour using previously stored index.
+	//rectangle(src, bounding_rect, Scalar(0, 255, 0), 1, 8, 0);
+	//imshow("src", src);
+	//   imshow("largest Contour", dst);
+	if (check_back == 0) {
+		Histogram1D h; // 히스토그램 객체
+		cv::MatND histo = h.getHistogram(median); // 히스토그램 계산
 
-																						//히스토그램
-	if (!skinImg.data)
-		return 0;
+		float sum = 0;
+		for (int i = 0; i < 256; i++) { // 각 빈도 조회
+			sum += histo.at<float>(i);
+		}
+		sum -= histo.at<float>(0);
+		cout << "전체 다리: " << sum << endl;
 
-	//   cv::namedWindow("Image");
-	//   cv::imshow("Image", skinImg);
-
-	Histogram1D h; // 히스토그램 객체
-	cv::MatND histo = h.getHistogram(median); // 히스토그램 계산
-
-	float sum = 0;
-	for (int i = 0; i < 256; i++) { // 각 빈도 조회
-									//   std::cout << "Value " << i << " = " << histo.at<float>(i) << std::endl;
-		sum += histo.at<float>(i);
-		//cout << i << " is " << histo.at<float>(i)<<endl;
+		entire = sum;
 	}
-	sum -= histo.at<float>(0);
-	cout << "전체 다리: " << sum<< endl;
-
-	Histogram1D h1; // 히스토그램 객체
-	cv::MatND histo1 = h1.getHistogram(area1); // 히스토그램 계산
-
-	float sum1=0;
-	for (int i = 0; i < 256; i++) { // 각 빈도 조회
-									//   std::cout << "Value " << i << " = " << histo.at<float>(i) << std::endl;
-		sum1 += histo1.at<float>(i);
-		//cout << i << " is " << histo1.at<float>(i)<<endl;
-	}
-//	sum1 -= histo1.at<float>(0);
-	Histogram1D h2; // 히스토그램 객체
-	cv::MatND histo2 = h2.getHistogram(area2); // 히스토그램 계산
-
-	float sum2=0;
-	for (int i = 0; i < 256; i++) { // 각 빈도 조회
-									//   std::cout << "Value " << i << " = " << histo.at<float>(i) << std::endl;
-		sum2 += histo2.at<float>(i);
-
-		//cout << i << " is " << histo1.at<float>(i) << endl;
-	}
-//	sum2 -= histo2.at<float>(0);
-
-	//cout << "다리영역 sum1 << "  " << sum2<<endl;
-	float sum3 = sum2 - sum1;
-	cout << "하지정맥 영역: " <<sum3<<endl;
-	cout << "하지정맥이 차지하는 퍼센트" << ( sum3 / sum )* 100 << endl;
-
-
-
-	//   cv::namedWindow("Histogram");
-	//   cv::imshow("Histogram", h.getHistogramImage(src));
-	// 히스토그램을 영상으로 띄우기
-	// 가운데를 중심으로 왼쪽이 검정색, 오른쪽이 흰색값
-	// 가운데 봉우리 부분은 중간 명암도 값
-	// 왼쪽이 영상의 전경, 오른쪽이 배경
-
 	// 영상을 두 그룹으로 나누는 부분을 경계값으로 처리해 확인
 	cv::Mat thresholded; // 경계값으로 이진 영상 생성
 	cv::threshold(src, thresholded, 200, 255, cv::THRESH_BINARY);
@@ -465,9 +451,19 @@ int main(int argc, char** argv)
 	//   imshow("original image", inputImg);
 	imshow("click image", inputImg);
 
-	//윈도우에 콜백함수를 등록
-	setMouseCallback("gray image", CallBackFunc, NULL);
+}
 
+int main(int argc, char** argv)
+{
+	thresh = 100;//170
+	check_back = 0;
+	//윈도우에 콜백함수를 등록
+	setMouseCallback("click image", CallBackFunc, NULL);
+
+	test();
+
+	//윈도우에 콜백함수를 등록
+	setMouseCallback("click image", CallBackFunc, NULL);
 
 	waitKey(0);
 	return 0;
